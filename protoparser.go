@@ -19,6 +19,12 @@ type Method struct {
 	OutputType    string `yaml:"output_type"`
 }
 
+func (m *Method) GeneratedPathToRepo() string {
+	// GeneratedPath starts with like github.com/org/repo/a/b/c...
+	paths := strings.Split(m.GeneratedPath, "/")
+	return strings.Join(paths[:3], "/")
+}
+
 func (m *Method) MangledName() string {
 	return strings.ToLower(fmt.Sprintf("%s.%s.%s", m.Name, m.InputType, m.OutputType))
 }
