@@ -27,8 +27,10 @@ func (c *Config) ServiceNameByGeneratedPath(path string) (string, error) {
 		if len(mtds) == 0 {
 			continue
 		}
-		if mtds[0].GeneratedPath == path {
-			return service.Name, nil
+		for _, mtd := range mtds {
+			if mtd.GeneratedPath == path {
+				return service.Name, nil
+			}
 		}
 	}
 	return path, nil
