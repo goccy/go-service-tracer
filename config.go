@@ -14,9 +14,15 @@ import (
 	"golang.org/x/xerrors"
 )
 
+type Option struct {
+	Config string `description:"specify config path" short:"c" long:"config" required:"true"`
+	Output string `description:"specify output name" short:"o" long:"output" default:"trace"`
+}
+
 type Config struct {
 	Auth     Auth       `yaml:"auth"`
 	Services []*Service `yaml:"services"`
+	Output   string     `yaml:"-"`
 }
 
 func (c *Config) ServiceNameByGeneratedPath(path string) (string, error) {
@@ -195,8 +201,8 @@ func (m *Method) MangledName() string {
 	return strings.ToLower(fmt.Sprintf("%s.%s.%s", m.Name, m.InputType, m.OutputType))
 }
 
-func LoadConfig(path string) (*Config, error) {
-	file, err := ioutil.ReadFile(path)
+func LoadConfig(opt *Option) (*Config, error) {
+	file, err := ioutil.ReadFile(opt.Config)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to load config: %w", err)
 	}
@@ -204,5 +210,6 @@ func LoadConfig(path string) (*Config, error) {
 	if err := yaml.Unmarshal(file, &cfg); err != nil {
 		return nil, xerrors.Errorf("failed to unmarshal: %w", err)
 	}
+	cfg.Output = opt.Output
 	return &cfg, nil
 }

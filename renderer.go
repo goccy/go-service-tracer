@@ -58,7 +58,7 @@ func (r *Renderer) Render(methodMap map[string][]*Method) error {
 	}
 	var b bytes.Buffer
 	g.Render(graph, graphviz.XDOT, &b)
-	g.RenderFilename(graph, graphviz.SVG, "result.svg")
+	g.RenderFilename(graph, graphviz.SVG, fmt.Sprintf("%s.svg", r.cfg.Output))
 	return nil
 }
 
