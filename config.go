@@ -1,6 +1,7 @@
 package servicetracer
 
 import (
+	"fmt"
 	"go/parser"
 	"go/token"
 	"io/ioutil"
@@ -97,7 +98,7 @@ func (s *Service) containsGoFile(dir string) bool {
 }
 
 func (s *Service) Entries() ([]string, error) {
-	root := filepath.Join(cacheDir, s.RepoName())
+	root := RepoRoot(s)
 	if s.Entry != "" {
 		return []string{filepath.Join(root, s.Entry)}, nil
 	}
@@ -165,7 +166,7 @@ func (s *Service) ProtoRepoName() string {
 func (s *Service) ProtoPaths() []string {
 	paths := []string{}
 	for _, path := range s.Proto.Path {
-		paths = append(paths, filepath.Join(cacheDir, s.ProtoRepoName(), path))
+		paths = append(paths, filepath.Join(ProtoRepoRoot(s), path))
 	}
 	return paths
 }
@@ -173,6 +174,25 @@ func (s *Service) ProtoPaths() []string {
 type Proto struct {
 	Repo string   `yaml:"repo"`
 	Path []string `yaml:"path"`
+}
+
+type Method struct {
+	Pkg           string `yaml:"pkg"`
+	GeneratedPath string `yaml:"generated_path"`
+	Service       string `yaml:"service"`
+	Name          string `yaml:"name"`
+	InputType     string `yaml:"input_type"`
+	OutputType    string `yaml:"output_type"`
+}
+
+func (m *Method) GeneratedPathToRepo() string {
+	// GeneratedPath starts with like github.com/org/repo/a/b/c...
+	paths := strings.Split(m.GeneratedPath, "/")
+	return strings.Join(paths[:3], "/")
+}
+
+func (m *Method) MangledName() string {
+	return strings.ToLower(fmt.Sprintf("%s.%s.%s", m.Name, m.InputType, m.OutputType))
 }
 
 func LoadConfig(path string) (*Config, error) {

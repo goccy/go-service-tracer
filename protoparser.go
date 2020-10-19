@@ -1,7 +1,6 @@
 package servicetracer
 
 import (
-	"fmt"
 	"io/ioutil"
 	"path/filepath"
 	"strings"
@@ -9,25 +8,6 @@ import (
 	"github.com/jhump/protoreflect/desc/protoparse"
 	"golang.org/x/xerrors"
 )
-
-type Method struct {
-	Pkg           string `yaml:"pkg"`
-	GeneratedPath string `yaml:"generated_path"`
-	Service       string `yaml:"service"`
-	Name          string `yaml:"name"`
-	InputType     string `yaml:"input_type"`
-	OutputType    string `yaml:"output_type"`
-}
-
-func (m *Method) GeneratedPathToRepo() string {
-	// GeneratedPath starts with like github.com/org/repo/a/b/c...
-	paths := strings.Split(m.GeneratedPath, "/")
-	return strings.Join(paths[:3], "/")
-}
-
-func (m *Method) MangledName() string {
-	return strings.ToLower(fmt.Sprintf("%s.%s.%s", m.Name, m.InputType, m.OutputType))
-}
 
 func ParseProto(serviceName, path string) ([]*Method, error) {
 	files, err := ioutil.ReadDir(path)

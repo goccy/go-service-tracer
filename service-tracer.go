@@ -1,10 +1,8 @@
 package servicetracer
 
 import (
-	"fmt"
 	"io/ioutil"
 	"os"
-	"path/filepath"
 
 	"github.com/goccy/go-yaml"
 	"golang.org/x/xerrors"
@@ -25,12 +23,11 @@ func New(cfg *Config) *ServiceTracer {
 }
 
 func (t *ServiceTracer) Run() error {
+	if err := CreateCacheDir(); err != nil {
+		return xerrors.Errorf("failed to create cache dir: %w", err)
+	}
 	if err := CloneRepository(t.cfg); err != nil {
 		return xerrors.Errorf("failed to clone repository: %w", err)
-	}
-	mapsDir := filepath.Join(cacheDir, "maps")
-	if err := os.MkdirAll(mapsDir, 0755); err != nil {
-		return xerrors.Errorf("failed to create directory %s: %w", mapsDir, err)
 	}
 	methodMap, err := t.createMethodMap()
 	if err != nil {
@@ -45,7 +42,7 @@ func (t *ServiceTracer) Run() error {
 func (t *ServiceTracer) createMethodMap() (map[string][]*Method, error) {
 	methodMap := map[string][]*Method{}
 	for _, service := range t.cfg.Services {
-		cachePath := filepath.Join(cacheDir, "maps", fmt.Sprintf("%s.yaml", service.Name))
+		cachePath := ServiceMapFile(service)
 		if _, err := os.Stat(cachePath); err == nil {
 			file, err := ioutil.ReadFile(cachePath)
 			if err != nil {
