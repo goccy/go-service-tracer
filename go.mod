@@ -8,6 +8,7 @@ require (
 	github.com/goccy/go-yaml v1.8.2
 	github.com/golang/protobuf v1.4.2 // indirect
 	github.com/google/go-cmp v0.5.2 // indirect
+	github.com/jessevdk/go-flags v1.4.0
 	github.com/jhump/protoreflect v1.7.0
 	github.com/mattn/go-colorable v0.1.8 // indirect
 	github.com/stretchr/testify v1.6.1 // indirect

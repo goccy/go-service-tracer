@@ -12,6 +12,15 @@ var (
 	cacheDir = ".service-tracer-cache"
 )
 
+func SubPath(service *Service, file string) string {
+	rootPath, _ := filepath.Abs(RepoRoot(service))
+	return file[len(rootPath):]
+}
+
+func FileURL(service *Service, file string) string {
+	return fmt.Sprintf("https://%s/blob/master%s", service.Repo, SubPath(service, file))
+}
+
 func mapsDir() string {
 	return filepath.Join(cacheDir, "maps")
 }

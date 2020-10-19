@@ -39,8 +39,8 @@ func (t *ServiceTracer) Run() error {
 	return nil
 }
 
-func (t *ServiceTracer) createMethodMap() (map[string][]*Method, error) {
-	methodMap := map[string][]*Method{}
+func (t *ServiceTracer) createMethodMap() (MethodMap, error) {
+	methodMap := MethodMap{}
 	for _, service := range t.cfg.Services {
 		cachePath := ServiceMapFile(service)
 		if _, err := os.Stat(cachePath); err == nil {
@@ -48,12 +48,12 @@ func (t *ServiceTracer) createMethodMap() (map[string][]*Method, error) {
 			if err != nil {
 				return nil, xerrors.Errorf("failed to read maps cache: %w", err)
 			}
-			var cm map[string][]*Method
+			var cm MethodMap
 			if err := yaml.Unmarshal(file, &cm); err != nil {
 				return nil, xerrors.Errorf("failed to unmarshal callmap file: %w", err)
 			}
 			for k, v := range cm {
-				for _, mtd := range v {
+				for _, mtd := range v.Methods {
 					service, err := t.cfg.ServiceNameByGeneratedPath(mtd.GeneratedPath)
 					if err != nil {
 						return nil, xerrors.Errorf("failed to get service name: %w", err)

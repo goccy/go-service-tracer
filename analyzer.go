@@ -20,7 +20,7 @@ func NewAnalyzer(cfg *Config) *Analyzer {
 	return &Analyzer{cfg: cfg}
 }
 
-func (a *Analyzer) Analyze(service *Service) (map[string][]*Method, error) {
+func (a *Analyzer) Analyze(service *Service) (MethodMap, error) {
 	mtdMap, err := service.MethodNameMap()
 	if err != nil {
 		return nil, xerrors.Errorf("failed to get method map: %w", err)
@@ -29,7 +29,7 @@ func (a *Analyzer) Analyze(service *Service) (map[string][]*Method, error) {
 	if err != nil {
 		return nil, xerrors.Errorf("failed to get entries: %w", err)
 	}
-	methodCallMap := map[string][]*Method{}
+	analyzedMethodMap := MethodMap{}
 	fmt.Printf("analyzing %s...\n", service.Name)
 	for _, path := range paths {
 		mainPkgs, err := a.mainPackages(path)
@@ -80,12 +80,7 @@ func (a *Analyzer) Analyze(service *Service) (map[string][]*Method, error) {
 			}
 
 			var filteredMethods []*Method
-			argPkgPath := params.At(1).Pkg().Path()
 			for _, mtd := range mtds {
-				// Ignore generated package.
-				if argPkgPath == mtd.GeneratedPath {
-					continue
-				}
 				inType := fmt.Sprintf("*%s.%s", mtd.GeneratedPath, mtd.InputType)
 				if params.At(1).Type().String() != inType {
 					continue
@@ -96,7 +91,7 @@ func (a *Analyzer) Analyze(service *Service) (map[string][]*Method, error) {
 				}
 				filteredMethods = append(filteredMethods, mtd)
 			}
-			if len(filteredMethods) != 1 {
+			if len(filteredMethods) == 0 {
 				return nil
 			}
 			mtd := filteredMethods[0]
@@ -116,9 +111,23 @@ func (a *Analyzer) Analyze(service *Service) (map[string][]*Method, error) {
 				}
 			}
 
+			methodName := mtd.MangledName()
 			calledMethodNameMap := map[string]struct{}{}
+			var sourceURL string
+			for _, node := range nodes {
+				url, err := a.ssaFuncToSourceURL(service, node.Func)
+				if err != nil {
+					continue
+				}
+				sourceURL = url
+				break
+			}
+			analyzedMethodMap[methodName] = &AnalyzedMethod{
+				SourceURL: sourceURL,
+				Methods:   []*Method{},
+			}
 			for _, f := range funcs {
-				calledMethod, err := a.ssaFuncToMethod(mtd.Name, f)
+				calledMethod, err := a.ssaFuncToMethod(f)
 				if err != nil {
 					return nil, xerrors.Errorf("failed to convert ssa.Function to Method: %w", err)
 				}
@@ -129,13 +138,11 @@ func (a *Analyzer) Analyze(service *Service) (map[string][]*Method, error) {
 					continue
 				}
 				calledMethodNameMap[calledMethodName] = struct{}{}
-
-				methodName := mtd.MangledName()
-				methodCallMap[methodName] = append(methodCallMap[methodName], calledMethod)
+				analyzedMethodMap[methodName].Methods = append(analyzedMethodMap[methodName].Methods, calledMethod)
 			}
 		}
 	}
-	return methodCallMap, nil
+	return analyzedMethodMap, nil
 }
 
 func (a *Analyzer) createCallGraph(mainPkgs []*ssa.Package) (*callgraph.Graph, error) {
@@ -198,7 +205,16 @@ func (a *Analyzer) removePkgPath(typ string) string {
 	return splitted[len(splitted)-1]
 }
 
-func (a *Analyzer) ssaFuncToMethod(name string, fn *ssa.Function) (*Method, error) {
+func (a *Analyzer) ssaFuncToSourceURL(service *Service, fn *ssa.Function) (string, error) {
+	sig := fn.Signature
+	pos := fn.Prog.Fset.Position(sig.Recv().Pos())
+	if !strings.HasPrefix(SubPath(service, pos.Filename), "/") {
+		return "", xerrors.Errorf("invalid create subpath from %s", pos.Filename)
+	}
+	return fmt.Sprintf("%s#L%d", FileURL(service, pos.Filename), pos.Line), nil
+}
+
+func (a *Analyzer) ssaFuncToMethod(fn *ssa.Function) (*Method, error) {
 	sig := fn.Signature
 
 	var (
@@ -222,7 +238,7 @@ func (a *Analyzer) ssaFuncToMethod(name string, fn *ssa.Function) (*Method, erro
 	return &Method{
 		GeneratedPath: generatedPath,
 		Service:       serviceName,
-		Name:          name,
+		Name:          fn.Name(),
 		InputType:     inputType,
 		OutputType:    outputType,
 	}, nil

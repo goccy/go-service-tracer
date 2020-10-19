@@ -14,6 +14,13 @@ import (
 	"golang.org/x/xerrors"
 )
 
+type MethodMap map[string]*AnalyzedMethod
+
+type AnalyzedMethod struct {
+	SourceURL string
+	Methods   []*Method
+}
+
 type Option struct {
 	Config string `description:"specify config path" short:"c" long:"config" required:"true"`
 	Output string `description:"specify output name" short:"o" long:"output" default:"trace"`
@@ -198,7 +205,7 @@ func (m *Method) GeneratedPathToRepo() string {
 }
 
 func (m *Method) MangledName() string {
-	return strings.ToLower(fmt.Sprintf("%s.%s.%s", m.Name, m.InputType, m.OutputType))
+	return strings.ToLower(fmt.Sprintf("%s.%s.%s.%s", m.Service, m.Name, m.InputType, m.OutputType))
 }
 
 func LoadConfig(opt *Option) (*Config, error) {

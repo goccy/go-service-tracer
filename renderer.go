@@ -21,7 +21,7 @@ func NewRenderer(cfg *Config) *Renderer {
 	return &Renderer{cfg: cfg}
 }
 
-func (r *Renderer) renderAllGraph(methodMap map[string][]*Method) (string, error) {
+func (r *Renderer) renderAllGraph(methodMap MethodMap) (string, error) {
 	g := graphviz.New()
 	graph, err := g.Graph()
 	if err != nil {
@@ -49,12 +49,14 @@ func (r *Renderer) renderAllGraph(methodMap map[string][]*Method) (string, error
 			}
 			from.SetLabel(fromName)
 			from.SetShape(cgraph.BoxShape)
-			calledMethods, exists := methodMap[mtd.MangledName()]
-			if !exists {
+			analyzedMethod, exists := methodMap[mtd.MangledName()]
+			if exists {
+				from.SetURL(analyzedMethod.SourceURL)
+			} else {
 				continue
 			}
 			edgeMap := map[string]struct{}{}
-			if err := r.render(subgraph, service.Name, edgeMap, from, mtd, calledMethods, methodMap); err != nil {
+			if err := r.render(subgraph, service.Name, edgeMap, from, mtd, analyzedMethod, methodMap); err != nil {
 				return "", xerrors.Errorf("failed to render graph: %w", err)
 			}
 		}
@@ -64,7 +66,7 @@ func (r *Renderer) renderAllGraph(methodMap map[string][]*Method) (string, error
 	return b.String(), nil
 }
 
-func (r *Renderer) renderServiceGraph(service *Service, methodMap map[string][]*Method) (string, error) {
+func (r *Renderer) renderServiceGraph(service *Service, methodMap MethodMap) (string, error) {
 	g := graphviz.New()
 	graph, err := g.Graph()
 	if err != nil {
@@ -90,12 +92,14 @@ func (r *Renderer) renderServiceGraph(service *Service, methodMap map[string][]*
 		}
 		from.SetLabel(fromName)
 		from.SetShape(cgraph.BoxShape)
-		calledMethods, exists := methodMap[mtd.MangledName()]
-		if !exists {
+		analyzedMethod, exists := methodMap[mtd.MangledName()]
+		if exists {
+			from.SetURL(analyzedMethod.SourceURL)
+		} else {
 			continue
 		}
 		edgeMap := map[string]struct{}{}
-		if err := r.render(graph, service.Name, edgeMap, from, mtd, calledMethods, methodMap); err != nil {
+		if err := r.render(graph, service.Name, edgeMap, from, mtd, analyzedMethod, methodMap); err != nil {
 			return "", xerrors.Errorf("failed to render graph: %w", err)
 		}
 	}
@@ -114,7 +118,7 @@ type renderParam struct {
 	Services []*serviceGraph
 }
 
-func (r *Renderer) Render(methodMap map[string][]*Method) error {
+func (r *Renderer) Render(methodMap MethodMap) error {
 	tmpl, err := template.New("graph.tmpl").Parse(outputHTML)
 	if err != nil {
 		return xerrors.Errorf("failed to parse template HTML: %w", err)
@@ -147,9 +151,9 @@ func (r *Renderer) Render(methodMap map[string][]*Method) error {
 	return nil
 }
 
-func (r *Renderer) render(graph *cgraph.Graph, serviceName string, edgeMap map[string]struct{}, fromNode *cgraph.Node, from *Method, methods []*Method, methodMap map[string][]*Method) error {
+func (r *Renderer) render(graph *cgraph.Graph, serviceName string, edgeMap map[string]struct{}, fromNode *cgraph.Node, from *Method, analyzedMethod *AnalyzedMethod, methodMap MethodMap) error {
 	fromName := fmt.Sprintf("%s.%s", from.Service, from.Name)
-	for _, to := range methods {
+	for _, to := range analyzedMethod.Methods {
 		if serviceName == to.Service {
 			continue
 		}
@@ -173,6 +177,7 @@ func (r *Renderer) render(graph *cgraph.Graph, serviceName string, edgeMap map[s
 		}
 		toMethods, exists := methodMap[to.MangledName()]
 		if exists {
+			toNode.SetURL(toMethods.SourceURL)
 			if err := r.render(graph, serviceName, edgeMap, toNode, to, toMethods, methodMap); err != nil {
 				return xerrors.Errorf("failed to render graph: %w", err)
 			}
