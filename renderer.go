@@ -3,9 +3,9 @@ package servicetracer
 import (
 	"bytes"
 	"fmt"
+	"image/color"
 	"io/ioutil"
 	"log"
-
 	"text/template"
 
 	"github.com/goccy/go-graphviz"
@@ -14,11 +14,47 @@ import (
 )
 
 type Renderer struct {
-	cfg *Config
+	cfg      *Config
+	colorIdx int
 }
 
 func NewRenderer(cfg *Config) *Renderer {
-	return &Renderer{cfg: cfg}
+	return &Renderer{
+		cfg:      cfg,
+		colorIdx: 0,
+	}
+}
+
+var (
+	colors = []color.Color{
+		color.RGBA{0xc7, 0x15, 0x85, 0xff}, // MediumVioletRed
+		color.RGBA{0xdc, 0x14, 0x3c, 0xff}, // Crimson
+		color.RGBA{0xff, 0x45, 0x00, 0xff}, // OrangeRed
+		color.RGBA{0x00, 0x64, 0x00, 0xff}, // DarkGreen
+		color.RGBA{0x00, 0xce, 0xd1, 0xff}, // DarkTurquoise
+		color.RGBA{0x41, 0x69, 0xe1, 0xff}, // RoyalBlue
+		color.RGBA{0x94, 0x00, 0xd3, 0xff}, // DarkViolet
+	}
+)
+
+func byteToHex(b byte) string {
+	hex := fmt.Sprintf("%x", b)
+	if b < 10 {
+		return "0" + hex
+	}
+	return hex
+}
+
+func (r *Renderer) generateColor() string {
+	paletteSize := len(colors)
+	if r.colorIdx < paletteSize {
+		red, green, blue, _ := colors[r.colorIdx].RGBA()
+		color := fmt.Sprintf("#%s%s%s", byteToHex(byte(red)), byteToHex(byte(green)), byteToHex(byte(blue)))
+		r.colorIdx++
+		return color
+	}
+	r.colorIdx = 0
+	return r.generateColor()
 }
 
 func (r *Renderer) renderAllGraph(methodMap MethodMap) (string, error) {
@@ -53,10 +89,15 @@ func (r *Renderer) renderAllGraph(methodMap MethodMap) (string, error) {
 			if exists {
 				from.SetURL(analyzedMethod.SourceURL)
 			} else {
+				from.SetColor("#c9c9c9")
+				continue
+			}
+			if len(analyzedMethod.Methods) == 0 {
 				continue
 			}
 			edgeMap := map[string]struct{}{}
-			if err := r.render(subgraph, service.Name, edgeMap, from, mtd, analyzedMethod, methodMap); err != nil {
+			edgeColor := r.generateColor()
+			if err := r.render(subgraph, service.Name, edgeColor, edgeMap, from, mtd, analyzedMethod, methodMap); err != nil {
 				return "", xerrors.Errorf("failed to render graph: %w", err)
 			}
 		}
@@ -96,10 +137,15 @@ func (r *Renderer) renderServiceGraph(service *Service, methodMap MethodMap) (st
 		if exists {
 			from.SetURL(analyzedMethod.SourceURL)
 		} else {
+			from.SetColor("#c9c9c9")
+			continue
+		}
+		if len(analyzedMethod.Methods) == 0 {
 			continue
 		}
 		edgeMap := map[string]struct{}{}
-		if err := r.render(graph, service.Name, edgeMap, from, mtd, analyzedMethod, methodMap); err != nil {
+		edgeColor := r.generateColor()
+		if err := r.render(graph, service.Name, edgeColor, edgeMap, from, mtd, analyzedMethod, methodMap); err != nil {
 			return "", xerrors.Errorf("failed to render graph: %w", err)
 		}
 	}
@@ -151,7 +197,16 @@ func (r *Renderer) Render(methodMap MethodMap) error {
 	return nil
 }
 
-func (r *Renderer) render(graph *cgraph.Graph, serviceName string, edgeMap map[string]struct{}, fromNode *cgraph.Node, from *Method, analyzedMethod *AnalyzedMethod, methodMap MethodMap) error {
+func (r *Renderer) render(
+	graph *cgraph.Graph,
+	serviceName string,
+	edgeColor string,
+	edgeMap map[string]struct{},
+	fromNode *cgraph.Node,
+	from *Method,
+	analyzedMethod *AnalyzedMethod,
+	methodMap MethodMap) error {
+
 	fromName := fmt.Sprintf("%s.%s", from.Service, from.Name)
 	for _, to := range analyzedMethod.Methods {
 		if serviceName == to.Service {
@@ -172,13 +227,15 @@ func (r *Renderer) render(graph *cgraph.Graph, serviceName string, edgeMap map[s
 		}
 		toNode.SetLabel(fmt.Sprintf("%s.%s", to.Service, to.Name))
 		toNode.SetShape(cgraph.BoxShape)
-		if _, err := graph.CreateEdge(fmt.Sprintf("%s.%s", fromName, toName), fromNode, toNode); err != nil {
+		edge, err := graph.CreateEdge(fmt.Sprintf("%s.%s", fromName, toName), fromNode, toNode)
+		if err != nil {
 			return xerrors.Errorf("failed to create edge: %w", err)
 		}
+		edge.SetColor(edgeColor)
 		toMethods, exists := methodMap[to.MangledName()]
 		if exists {
 			toNode.SetURL(toMethods.SourceURL)
-			if err := r.render(graph, serviceName, edgeMap, toNode, to, toMethods, methodMap); err != nil {
+			if err := r.render(graph, serviceName, edgeColor, edgeMap, toNode, to, toMethods, methodMap); err != nil {
 				return xerrors.Errorf("failed to render graph: %w", err)
 			}
 		}
