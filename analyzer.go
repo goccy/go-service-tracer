@@ -3,6 +3,7 @@ package servicetracer
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"golang.org/x/tools/go/callgraph"
 	"golang.org/x/tools/go/packages"
@@ -249,14 +250,6 @@ func (a *Analyzer) getGRPCMethods(service *Service, protoGoRepo string, from *ca
 		return nil
 	}
 	nodeMap[from.ID] = struct{}{}
-	recv := from.Func.Signature.Recv()
-	if recv != nil {
-		if !strings.Contains(recv.Pkg().Path(), service.Repo) {
-			return nil
-		}
-	} else {
-		return nil
-	}
 	nodes, exists := edgeMap[from.ID]
 	if !exists {
 		return nil
@@ -276,6 +269,9 @@ func (a *Analyzer) getGRPCMethods(service *Service, protoGoRepo string, from *ca
 func (a *Analyzer) isGRPCMethod(node *callgraph.Node, protoGoRepo string) bool {
 	path := a.nodeToPkgPath(node)
 	if !strings.Contains(path, protoGoRepo) {
+		return false
+	}
+	if node.Func.Name() == "" || !unicode.IsUpper(rune(node.Func.Name()[0])) {
 		return false
 	}
 	sig := node.Func.Signature

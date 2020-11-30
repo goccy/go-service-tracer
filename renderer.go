@@ -10,6 +10,7 @@ import (
 
 	"github.com/goccy/go-graphviz"
 	"github.com/goccy/go-graphviz/cgraph"
+	"github.com/rs/xid"
 	"golang.org/x/xerrors"
 )
 
@@ -57,95 +58,78 @@ func (r *Renderer) generateColor() string {
 	return r.generateColor()
 }
 
-func (r *Renderer) renderAllGraph(methodMap MethodMap) (string, error) {
-	g := graphviz.New()
-	graph, err := g.Graph()
-	if err != nil {
-		return "", xerrors.Errorf("failed to create graphviz graph: %w", err)
-	}
-	defer func() {
-		if err := graph.Close(); err != nil {
-			log.Fatalf("failed to close graphviz graph %s", err)
-		}
-		g.Close()
-	}()
-	graph.SetRankDir(cgraph.LRRank)
-	graph.SetNewRank(true)
-	for _, service := range r.cfg.Services {
-		subgraph := graph.SubGraph(fmt.Sprintf("cluster%s", service.Name), 1)
-		mtds, err := service.Methods()
-		if err != nil {
-			return "", xerrors.Errorf("failed to parse proto file: %w", err)
-		}
-		for _, mtd := range mtds {
-			fromName := fmt.Sprintf("%s.%s", service.Name, mtd.Name)
-			from, err := subgraph.CreateNode(fmt.Sprintf("%s.%s.%s", service.Name, service.Name, mtd.Name))
-			if err != nil {
-				return "", xerrors.Errorf("failed to create node: %w", err)
-			}
-			from.SetLabel(fromName)
-			from.SetShape(cgraph.BoxShape)
-			analyzedMethod, exists := methodMap[mtd.MangledName()]
-			if exists {
-				from.SetURL(analyzedMethod.SourceURL)
-			} else {
-				from.SetColor("#c9c9c9")
-				continue
-			}
-			if len(analyzedMethod.Methods) == 0 {
-				continue
-			}
-			edgeMap := map[string]struct{}{}
-			edgeColor := r.generateColor()
-			if err := r.render(subgraph, service.Name, edgeColor, edgeMap, from, mtd, analyzedMethod, methodMap); err != nil {
-				return "", xerrors.Errorf("failed to render graph: %w", err)
-			}
-		}
-	}
-	var b bytes.Buffer
-	g.Render(graph, graphviz.SVG, &b)
-	return b.String(), nil
-}
-
-func (r *Renderer) renderServiceGraph(service *Service, methodMap MethodMap) (string, error) {
-	g := graphviz.New()
-	graph, err := g.Graph()
-	if err != nil {
-		return "", xerrors.Errorf("failed to create graphviz graph: %w", err)
-	}
-	defer func() {
-		if err := graph.Close(); err != nil {
-			log.Fatalf("failed to close graphviz graph %s", err)
-		}
-		g.Close()
-	}()
-	graph.SetRankDir(cgraph.LRRank)
-	graph.SetNewRank(true)
+func (r *Renderer) renderServiceGraph(service *Service, methodMap MethodMap) ([]*methodGraph, error) {
 	mtds, err := service.Methods()
 	if err != nil {
-		return "", xerrors.Errorf("failed to parse proto file: %w", err)
+		return nil, xerrors.Errorf("failed to parse proto file: %w", err)
 	}
+	graphs := []*methodGraph{}
 	for _, mtd := range mtds {
-		fromName := fmt.Sprintf("%s.%s", service.Name, mtd.Name)
-		from, err := graph.CreateNode(fmt.Sprintf("%s.%s.%s", service.Name, service.Name, mtd.Name))
+		graph, err := r.renderMethodGraph(service, mtd, methodMap)
 		if err != nil {
-			return "", xerrors.Errorf("failed to create node: %w", err)
+			return nil, xerrors.Errorf("failed to render method graph: %w", err)
 		}
-		from.SetLabel(fromName)
-		from.SetShape(cgraph.BoxShape)
-		analyzedMethod, exists := methodMap[mtd.MangledName()]
-		if exists {
-			from.SetURL(analyzedMethod.SourceURL)
-		} else {
-			from.SetColor("#c9c9c9")
-			continue
+		graphs = append(graphs, &methodGraph{
+			Name:  mtd.Name,
+			Graph: graph,
+		})
+	}
+	return graphs, nil
+}
+
+func (r *Renderer) uniqueSubgraph(graph *cgraph.Graph) *cgraph.Graph {
+	return graph.SubGraph(fmt.Sprintf("cluster%s", r.generateID()), 1)
+}
+
+func (r *Renderer) uniqueNode(graph *cgraph.Graph, name string) (*cgraph.Node, error) {
+	node, err := graph.CreateNode(r.generateID())
+	if err != nil {
+		return nil, xerrors.Errorf("failed to create node: %w", err)
+	}
+	node.SetLabel(name)
+	node.SetShape(cgraph.BoxShape)
+	return node, nil
+}
+
+func (r *Renderer) uniqueEdge(graph *cgraph.Graph, from *cgraph.Node, to *cgraph.Node) (*cgraph.Edge, error) {
+	edge, err := graph.CreateEdge(r.generateID(), from, to)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to create edge: %w", err)
+	}
+	edge.SetColor(r.generateColor())
+	return edge, nil
+}
+
+func (r *Renderer) renderMethodGraph(service *Service, mtd *Method, methodMap MethodMap) (string, error) {
+	g := graphviz.New()
+	graph, err := g.Graph()
+	if err != nil {
+		return "", xerrors.Errorf("failed to create graphviz graph: %w", err)
+	}
+	defer func() {
+		if err := graph.Close(); err != nil {
+			log.Fatalf("failed to close graphviz graph %s", err)
 		}
-		if len(analyzedMethod.Methods) == 0 {
-			continue
-		}
+		g.Close()
+	}()
+	graph.SetRankDir(cgraph.LRRank)
+	graph.SetNewRank(true)
+
+	mtdName := fmt.Sprintf("%s.%s", service.Name, mtd.Name)
+
+	from, err := r.uniqueNode(graph, mtdName)
+	if err != nil {
+		return "", xerrors.Errorf("failed to create unique node: %w", err)
+	}
+	analyzedMethod, exists := methodMap[mtd.MangledName()]
+	if exists {
+		from.SetURL(analyzedMethod.SourceURL)
+	} else {
+		from.SetColor("#c9c9c9")
+	}
+	if analyzedMethod != nil && len(analyzedMethod.Methods) != 0 {
 		edgeMap := map[string]struct{}{}
-		edgeColor := r.generateColor()
-		if err := r.render(graph, service.Name, edgeColor, edgeMap, from, mtd, analyzedMethod, methodMap); err != nil {
+		if err := r.render(graph, service.Name, edgeMap, from, mtd, analyzedMethod, methodMap); err != nil {
 			return "", xerrors.Errorf("failed to render graph: %w", err)
 		}
 	}
@@ -155,13 +139,21 @@ func (r *Renderer) renderServiceGraph(service *Service, methodMap MethodMap) (st
 }
 
 type serviceGraph struct {
+	Name    string
+	Methods []*methodGraph
+}
+
+type methodGraph struct {
 	Name  string
 	Graph string
 }
 
 type renderParam struct {
-	All      string
 	Services []*serviceGraph
+}
+
+func (r *Renderer) generateID() string {
+	return xid.New().String()
 }
 
 func (r *Renderer) Render(methodMap MethodMap) error {
@@ -169,24 +161,19 @@ func (r *Renderer) Render(methodMap MethodMap) error {
 	if err != nil {
 		return xerrors.Errorf("failed to parse template HTML: %w", err)
 	}
-	all, err := r.renderAllGraph(methodMap)
-	if err != nil {
-		return xerrors.Errorf("failed to render all graph: %w", err)
-	}
 	graphs := []*serviceGraph{}
 	for _, service := range r.cfg.Services {
-		graph, err := r.renderServiceGraph(service, methodMap)
+		mtds, err := r.renderServiceGraph(service, methodMap)
 		if err != nil {
 			return xerrors.Errorf("failed to render service graph: %w", err)
 		}
 		graphs = append(graphs, &serviceGraph{
-			Name:  service.Name,
-			Graph: graph,
+			Name:    service.Name,
+			Methods: mtds,
 		})
 	}
 	var b bytes.Buffer
 	if err := tmpl.Execute(&b, renderParam{
-		All:      all,
 		Services: graphs,
 	}); err != nil {
 		return xerrors.Errorf("failed to execute template: %w", err)
@@ -200,7 +187,6 @@ func (r *Renderer) Render(methodMap MethodMap) error {
 func (r *Renderer) render(
 	graph *cgraph.Graph,
 	serviceName string,
-	edgeColor string,
 	edgeMap map[string]struct{},
 	fromNode *cgraph.Node,
 	from *Method,
@@ -221,21 +207,17 @@ func (r *Renderer) render(
 			continue
 		}
 		edgeMap[edgeName] = struct{}{}
-		toNode, err := graph.CreateNode(toName)
+		toNode, err := r.uniqueNode(graph, fmt.Sprintf("%s.%s", to.Service, to.Name))
 		if err != nil {
-			return xerrors.Errorf("failed to create node: %w", err)
+			return xerrors.Errorf("failed to create unique node: %w", err)
 		}
-		toNode.SetLabel(fmt.Sprintf("%s.%s", to.Service, to.Name))
-		toNode.SetShape(cgraph.BoxShape)
-		edge, err := graph.CreateEdge(fmt.Sprintf("%s.%s", fromName, toName), fromNode, toNode)
-		if err != nil {
+		if _, err := r.uniqueEdge(graph, fromNode, toNode); err != nil {
 			return xerrors.Errorf("failed to create edge: %w", err)
 		}
-		edge.SetColor(edgeColor)
 		toMethods, exists := methodMap[to.MangledName()]
 		if exists {
 			toNode.SetURL(toMethods.SourceURL)
-			if err := r.render(graph, serviceName, edgeColor, edgeMap, toNode, to, toMethods, methodMap); err != nil {
+			if err := r.render(graph, serviceName, edgeMap, toNode, to, toMethods, methodMap); err != nil {
 				return xerrors.Errorf("failed to render graph: %w", err)
 			}
 		}
@@ -256,6 +238,10 @@ const outputHTML = `
     height: 100vh;
     overflow-y:scroll;
 }
+
+h3 {
+    margin: 20px;
+}
   </style>
   <script type="text/javascript">
     function selectService(serviceName) {
@@ -268,10 +254,13 @@ const outputHTML = `
     <div class="row">
       <div id="list" class="col-3">
         <ul class="list-group">
-          <div id="all" style="display:none">{{ .All }}</div>
-          <li class="list-group-item list-group-item-action" onClick="selectService('all')">ALL</li>
           {{- range .Services }}
-          <div id="{{ .Name }}" style="display:none">{{ .Graph }}</div>
+          <div id="{{ .Name }}" style="display:none">
+            {{- range .Methods }}
+            <h3>{{ .Name }}</h3>
+            {{ .Graph }}
+            {{- end }}
+          </div>
           <li class="list-group-item list-group-item-action" onClick="selectService('{{ .Name }}')">{{ .Name }}</li>
           {{- end }}
         </ul>
@@ -284,6 +273,7 @@ const outputHTML = `
       </div>
     </div>
   </body>
-  <script type="text/javascript">selectService("all");</script>
+  {{- $service := index .Services 0 }}
+  <script type="text/javascript">selectService("{{ $service.Name }}");</script>
 </html>
 `
